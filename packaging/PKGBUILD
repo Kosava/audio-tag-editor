@@ -1,0 +1,70 @@
+# Maintainer: Alen
+#
+# PKGBUILD je namerno u packaging/: makepkg koristi "src/" pored PKGBUILD-a
+# kao radni folder, a u korenu projekta je src/ sa Rust kodom.
+#     cd packaging && makepkg -si
+#
+# Za AUR / GitHub zameni source=() sa:
+#     source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+#     sha256sums=('...')        # updpkgsums
+# i obriši kopiranje iz prepare() (tarball se raspakuje u "$srcdir/$pkgname-$pkgver").
+
+pkgname=audio-tag-editor
+pkgver=2.0.0
+pkgrel=1
+pkgdesc="Editor audio tagova (MP3, FLAC, OGG, Opus, M4A) sa MusicBrainz pretragom — Rust + Slint"
+arch=('x86_64' 'aarch64')
+url="https://github.com/alen/audio-tag-editor"
+license=('MIT')
+depends=(
+    'gcc-libs'
+    'glibc'
+    'glib2'
+    'gtk3'          # dijalozi za izbor fajlova i poruke (rfd)
+    'alsa-lib'      # pretpreslušavanje (rodio)
+    'fontconfig'
+    'libxkbcommon'  # tastatura (winit)
+)
+makedepends=('cargo')
+# Cargo profil već radi LTO; makepkg-ov LTO u CFLAGS zna da pokvari C delove (ring).
+options=('!lto')
+source=()
+sha256sums=()
+
+_srcname="$pkgname-$pkgver"
+
+prepare() {
+    # Kopira izvorni kod iz korena projekta (folder iznad packaging/)
+    local _proj="$startdir/.."
+    rm -rf "$srcdir/$_srcname"
+    mkdir -p "$srcdir/$_srcname"
+    cp -r "$_proj"/{src,ui,data,tests,.cargo,build.rs,Cargo.toml,Cargo.lock,README.md,LICENSE} \
+        "$srcdir/$_srcname/"
+
+    cd "$srcdir/$_srcname"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$srcdir/$_srcname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$srcdir/$_srcname"
+    export RUSTUP_TOOLCHAIN=stable
+    # --release: koristi već prevedene zavisnosti iz build()-a
+    cargo test --frozen --release
+}
+
+package() {
+    cd "$srcdir/$_srcname"
+    install -Dm755 target/release/$pkgname "$pkgdir/usr/bin/$pkgname"
+    install -Dm644 data/$pkgname.desktop "$pkgdir/usr/share/applications/$pkgname.desktop"
+    install -Dm644 data/$pkgname.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

@@ -1,0 +1,412 @@
+import { Button, LineEdit, SpinBox, ComboBox, CheckBox, GroupBox, ListView, ScrollView, Palette } from "std-widgets.slint";
+
+export struct Row {
+    checked: bool,
+    mark: string,   // "● " nesačuvano, "⚠ " greška
+    name: string,
+    title: string,
+    artist: string,
+    album: string,
+    year: string,
+    format: string,
+}
+
+global Theme {
+    in-out property <bool> dark;
+    out property <color> accent: dark ? #4FD1C5 : #2C7A7B;
+    out property <color> accent-hover: dark ? #38B2AC : #285E61;
+    out property <color> bg: dark ? #1A202C : #F0F4F8;
+    out property <color> card: dark ? #2D3748 : #FFFFFF;
+    out property <color> alt: dark ? #252F3F : #F7FAFC;
+    out property <color> text: dark ? #E2E8F0 : #1A202C;
+    out property <color> text2: dark ? #A0AEC0 : #4A5568;
+    out property <color> border: dark ? #4A5568 : #CBD5E0;
+    out property <color> sel: dark ? #285E61 : #B2F5EA;
+    out property <color> sel-text: dark ? #E6FFFA : #234E52;
+}
+
+component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-height: 40px;
+    border-radius: 6px;
+    background: !root.enabled ? Theme.border : ta.has-hover ? Theme.accent-hover : Theme.accent;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        Text {
+            text: root.text;
+            color: root.enabled ? (Theme.dark ? #1A202C : #FFFFFF) : Theme.text2;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Header inherits Text {
+    color: Theme.accent;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+component Cell inherits Text {
+    in property <bool> selected;
+    color: selected ? Theme.sel-text : Theme.text;
+    overflow: elide;
+    vertical-alignment: center;
+}
+
+component HeadCell inherits Text {
+    color: Theme.text2;
+    font-weight: 600;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+component FormLabel inherits Text {
+    color: Theme.text;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+}
+
+export component AppWindow inherits Window {
+    title: "Audio Tag Editor" + (root.any-dirty ? " •" : "");
+    icon: @image-url("../data/audio-tag-editor.svg");
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 1000px;
+    min-height: 620px;
+    background: Theme.bg;
+
+    in property <[Row]> rows;
+    in-out property <int> current: -1;
+    in-out property <bool> dark;
+    in property <bool> any-dirty;
+    in property <bool> any-checked;
+    in property <bool> has-tracks;
+    in property <bool> loading;
+    in property <bool> playing;
+    in property <bool> searching;
+    in property <string> status: "Spremno — dodaj audio fajlove";
+    in property <string> summary;
+
+    // Forma (dvosmerno vezana za polja; Rust ih puni pri izboru pesme)
+    in property <bool> form-enabled;
+    in property <string> form-title: "Metapodaci";
+    in-out property <string> f-title;
+    in-out property <string> f-artist;
+    in-out property <string> f-album;
+    in-out property <string> f-albumartist;
+    in-out property <string> f-year;
+    in-out property <string> f-genre;
+    in-out property <int> f-track;
+    in-out property <string> f-comment;
+
+    // MusicBrainz rezultati
+    in property <bool> show-results;
+    in property <string> results-header;
+    in property <[string]> results;
+    in-out property <int> result-index;
+
+    callback add-files();
+    callback add-folder();
+    callback remove();
+    callback clear-all();
+    callback save-current();
+    callback save-all();
+    callback revert();
+    callback toggle-play();
+    callback online();
+    callback about();
+    callback theme-changed(bool);
+    callback select(int);
+    callback toggle-check(int, bool);
+    callback check-all(bool);
+    callback field-edited(string, string);
+    callback batch(string, string);
+    callback pick-result(int);
+    callback cancel-results();
+
+    init => {
+        Theme.dark = root.dark;
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+    changed dark => {
+        Theme.dark = root.dark;
+        Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    property <[string]> genres: [
+        "", "Pop", "Rock", "Jazz", "Classical", "Electronic", "Hip-Hop", "R&B",
+        "Country", "Folk", "Metal", "Blues", "Reggae", "Funk", "Soul",
+        "Soundtrack", "Narodna", "Starogradska", "Ostalo",
+    ];
+
+    FocusScope {
+        // Prečice; polja za unos sama troše svoje tastere, ostalo stiže ovde.
+        key-pressed(e) => {
+            if (e.modifiers.control) {
+                if (e.text == "o") { root.add-files(); return accept; }
+                if (e.text == "O") { root.add-folder(); return accept; }
+                if (e.text == "s") { root.save-current(); return accept; }
+                if (e.text == "S") { root.save-all(); return accept; }
+                if (e.text == "r") { root.revert(); return accept; }
+                if (e.text == "f") { root.online(); return accept; }
+                if (e.text == "p") { root.toggle-play(); return accept; }
+            }
+            if (e.text == Key.Delete) { root.remove(); return accept; }
+            reject
+        }
+
+        VerticalLayout {
+            // ---------- Traka sa alatima ----------
+            Rectangle {
+                background: Theme.card;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    Button { text: "Dodaj fajlove"; enabled: !root.loading; clicked => { root.add-files(); } }
+                    Button { text: "Dodaj folder"; enabled: !root.loading; clicked => { root.add-folder(); } }
+                    Rectangle { width: 10px; }
+                    Button { text: "Ukloni"; enabled: root.has-tracks && !root.loading; clicked => { root.remove(); } }
+                    Button { text: "Očisti"; enabled: root.has-tracks && !root.loading; clicked => { root.clear-all(); } }
+                    Rectangle { width: 10px; }
+                    Button { text: "Sačuvaj"; enabled: root.form-enabled; clicked => { root.save-current(); } }
+                    Button { text: "Sačuvaj sve"; enabled: root.any-dirty; clicked => { root.save-all(); } }
+                    Button { text: "Poništi"; enabled: root.form-enabled; clicked => { root.revert(); } }
+                    Rectangle { width: 10px; }
+                    Button { text: root.playing ? "Pauza" : "Pusti"; enabled: root.current >= 0 || root.playing; clicked => { root.toggle-play(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: root.dark ? "Svetla tema" : "Tamna tema"; clicked => { root.dark = !root.dark; root.theme-changed(root.dark); } }
+                    Button { text: "O programu"; clicked => { root.about(); } }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.border; }
+            }
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 12px;
+                vertical-stretch: 1;
+
+                // ---------- Lista pesama ----------
+                VerticalLayout {
+                    horizontal-stretch: 3;
+                    spacing: 8px;
+                    Header { text: "Lista pesama"; }
+                    Rectangle {
+                        background: Theme.card;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        clip: true;
+                        VerticalLayout {
+                            HorizontalLayout {
+                                height: 36px;
+                                padding-left: 6px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                CheckBox {
+                                    width: 24px;
+                                    checked: root.any-checked;
+                                    toggled => { root.check-all(self.checked); }
+                                }
+                                HeadCell { text: "Fajl"; horizontal-stretch: 1; min-width: 120px; }
+                                HeadCell { text: "Naslov"; width: 160px; }
+                                HeadCell { text: "Izvođač"; width: 140px; }
+                                HeadCell { text: "Album"; width: 140px; }
+                                HeadCell { text: "Godina"; width: 52px; }
+                                HeadCell { text: "Format"; width: 50px; }
+                            }
+                            Rectangle { height: 2px; background: Theme.accent; }
+                            ListView {
+                                vertical-stretch: 1;
+                                for row[i] in root.rows: Rectangle {
+                                    height: 32px;
+                                    background: i == root.current ? Theme.sel : Math.mod(i, 2) == 1 ? Theme.alt : Theme.card;
+                                    TouchArea { clicked => { root.select(i); } }
+                                    HorizontalLayout {
+                                        padding-left: 6px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+                                        CheckBox {
+                                            width: 24px;
+                                            checked: row.checked;
+                                            toggled => { root.toggle-check(i, self.checked); }
+                                        }
+                                        Cell { selected: i == root.current; text: row.mark + row.name; horizontal-stretch: 1; min-width: 120px; }
+                                        Cell { selected: i == root.current; text: row.title; width: 160px; }
+                                        Cell { selected: i == root.current; text: row.artist; width: 140px; }
+                                        Cell { selected: i == root.current; text: row.album; width: 140px; }
+                                        Cell { selected: i == root.current; text: row.year; width: 52px; }
+                                        Cell { selected: i == root.current; text: row.format; width: 50px; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---------- Uređivanje ----------
+                ScrollView {
+                    horizontal-stretch: 2;
+                    min-width: 420px;
+                    VerticalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        padding-right: 10px;
+                        Header { text: "Uređivanje tagova"; }
+                        PrimaryButton {
+                            text: root.searching ? "Pretražujem…" : "Online popuni (MusicBrainz)  ·  Ctrl+F";
+                            enabled: root.form-enabled && !root.searching;
+                            clicked => { root.online(); }
+                        }
+                        GroupBox {
+                            title: root.form-title;
+                            enabled: root.form-enabled;
+                            GridLayout {
+                                spacing: 8px;
+                                Row {
+                                    FormLabel { text: "Naslov"; }
+                                    LineEdit { text <=> root.f-title; placeholder-text: "Naslov pesme"; edited(t) => { root.field-edited("title", t); } }
+                                }
+                                Row {
+                                    FormLabel { text: "Izvođač"; }
+                                    LineEdit { text <=> root.f-artist; placeholder-text: "Izvođač"; edited(t) => { root.field-edited("artist", t); } }
+                                }
+                                Row {
+                                    FormLabel { text: "Album"; }
+                                    LineEdit { text <=> root.f-album; placeholder-text: "Naziv albuma"; edited(t) => { root.field-edited("album", t); } }
+                                }
+                                Row {
+                                    FormLabel { text: "Album izvođač"; }
+                                    LineEdit { text <=> root.f-albumartist; placeholder-text: "Album izvođač"; edited(t) => { root.field-edited("albumartist", t); } }
+                                }
+                                Row {
+                                    FormLabel { text: "Godina"; }
+                                    LineEdit { text <=> root.f-year; placeholder-text: "npr. 2024 ili 2024-05-17"; edited(t) => { root.field-edited("year", t); } }
+                                }
+                                Row {
+                                    FormLabel { text: "Žanr"; }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        LineEdit { text <=> root.f-genre; placeholder-text: "Žanr"; edited(t) => { root.field-edited("genre", t); } }
+                                        ComboBox {
+                                            width: 130px;
+                                            model: root.genres;
+                                            selected(v) => {
+                                                root.f-genre = v;
+                                                root.field-edited("genre", v);
+                                            }
+                                        }
+                                    }
+                                }
+                                Row {
+                                    FormLabel { text: "Broj numere"; }
+                                    SpinBox {
+                                        value <=> root.f-track;
+                                        minimum: 0;
+                                        maximum: 9999;
+                                        edited(v) => { root.field-edited("track", "\{v}"); }
+                                    }
+                                }
+                                Row {
+                                    FormLabel { text: "Komentar"; }
+                                    LineEdit { text <=> root.f-comment; placeholder-text: "Komentar"; edited(t) => { root.field-edited("comment", t); } }
+                                }
+                            }
+                        }
+                        GroupBox {
+                            title: "Batch izmene (na označene ☑)";
+                            enabled: root.any-checked;
+                            VerticalLayout {
+                                spacing: 6px;
+                                for b in [
+                                    { key: "artist", label: "Izvođač" },
+                                    { key: "albumartist", label: "Album izvođač" },
+                                    { key: "album", label: "Album" },
+                                    { key: "year", label: "Godina" },
+                                    { key: "genre", label: "Žanr" },
+                                ]: HorizontalLayout {
+                                    spacing: 6px;
+                                    le := LineEdit { placeholder-text: b.label; }
+                                    Button { text: "Primeni"; clicked => { root.batch(b.key, le.text); } }
+                                }
+                            }
+                        }
+                        PrimaryButton {
+                            text: "Sačuvaj trenutni fajl  ·  Ctrl+S";
+                            enabled: root.form-enabled;
+                            clicked => { root.save-current(); }
+                        }
+                    }
+                }
+            }
+
+            // ---------- Statusna linija ----------
+            Rectangle {
+                height: 28px;
+                background: Theme.card;
+                Rectangle { y: 0; height: 1px; background: Theme.border; }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    Text { text: root.status; color: Theme.text2; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: root.summary; color: Theme.text2; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ---------- Izbor MusicBrainz rezultata ----------
+    if root.show-results: Rectangle {
+        background: #00000080;
+        TouchArea { }
+        dialog := Rectangle {
+            width: min(780px, root.width - 40px);
+            height: min(480px, root.height - 40px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.card;
+            border-radius: 10px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000060;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                Header { text: "Izaberi online rezultat"; }
+                Text { text: root.results-header; color: Theme.text2; wrap: word-wrap; }
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    border-radius: 6px;
+                    clip: true;
+                    ListView {
+                        for r[i] in root.results: Rectangle {
+                            height: 34px;
+                            background: i == root.result-index ? Theme.sel : Math.mod(i, 2) == 1 ? Theme.alt : Theme.card;
+                            TouchArea {
+                                clicked => { root.result-index = i; }
+                                double-clicked => { root.pick-result(i); }
+                            }
+                            Cell { x: 10px; width: parent.width - 20px; selected: i == root.result-index; text: r; }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button { text: "Otkaži"; clicked => { root.cancel-results(); } }
+                    PrimaryButton { text: "Primeni"; clicked => { root.pick-result(root.result-index); } }
+                }
+            }
+        }
+    }
+}

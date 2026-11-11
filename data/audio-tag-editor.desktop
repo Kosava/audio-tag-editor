@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Audio Tag Editor
+GenericName=Audio Tag Editor
+GenericName[sr]=Editor audio tagova
+Comment=Edit tags of MP3, FLAC, OGG, Opus and M4A files
+Comment[sr]=Uređivanje tagova MP3, FLAC, OGG, Opus i M4A fajlova
+Exec=audio-tag-editor %F
+Icon=audio-tag-editor
+Terminal=false
+Categories=AudioVideo;Audio;Qt;
+Keywords=tag;id3;mp3;flac;metadata;musicbrainz;
+MimeType=audio/mpeg;audio/flac;audio/x-flac;audio/ogg;audio/x-vorbis+ogg;audio/x-opus+ogg;audio/opus;audio/mp4;audio/x-m4a;
+StartupWMClass=audio-tag-editor

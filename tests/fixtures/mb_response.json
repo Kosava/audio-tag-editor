@@ -1,0 +1,33 @@
+{
+  "count": 2,
+  "recordings": [
+    {
+      "id": "low",
+      "score": 40,
+      "title": "Nešto drugo",
+      "artist-credit": [{ "name": "Neko" }]
+    },
+    {
+      "id": "abc",
+      "score": 97,
+      "title": "Lutka sa naslovne strane",
+      "artist-credit": [{ "name": "Riblja Čorba", "joinphrase": "" }],
+      "tags": [{ "count": 1, "name": "pop" }, { "count": 5, "name": "rock" }],
+      "releases": [
+        {
+          "title": "Najveći hitovi",
+          "status": "Official",
+          "date": "1995",
+          "release-group": { "primary-type": "Album", "secondary-types": ["Compilation"] }
+        },
+        {
+          "title": "Kost u grlu",
+          "status": "Official",
+          "date": "1979-03-01",
+          "release-group": { "primary-type": "Album" },
+          "media": [{ "track-count": 9, "track": [{ "number": "2" }] }]
+        }
+      ]
+    }
+  ]
+}
